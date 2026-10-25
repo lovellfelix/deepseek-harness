@@ -83,6 +83,7 @@ afterEach(async () => {
   for (const lifetime of lifetimes) lifetime.abort()
   lifetimes.clear()
   localStorage.clear()
+  delete (globalThis as { dshDesktop?: unknown }).dshDesktop
   vi.restoreAllMocks()
 })
 
@@ -263,6 +264,29 @@ describe('BrowserBody', () => {
     await waitFor(() => { expect(mounted.view.getByRole('alert').textContent).toBe(zh['error.protocol']) })
     expect(input).toHaveProperty('value', 'file:/work/index.html')
     expect(mounted.view.container.querySelector('iframe')).toBeNull()
+  })
+
+
+  it('hides the saved-login control without a desktop login bridge', () => {
+    const mounted = mountBrowser()
+    expect(mounted.view.queryByRole('button', { name: zh['login.button'] })).toBeNull()
+  })
+
+  it('lists saved browser logins from the desktop bridge and imports one', async () => {
+    const loginSources = vi.fn(async () => [{ id: 'chrome:Google/Chrome:Default', label: 'Google Chrome — Default' }])
+    const importLogins = vi.fn(async () => ({
+      status: 'imported' as const, label: 'Google Chrome — Default', imported: 3, skipped: 0, failed: 0,
+    }))
+    ;(globalThis as { dshDesktop?: unknown }).dshDesktop = {
+      protocolVersion: 1, browser: { login: { loginSources, importLogins } },
+    }
+    const mounted = mountBrowser()
+    fireEvent.click(mounted.view.getByRole('button', { name: zh['login.button'] }))
+    await waitFor(() => { expect(mounted.view.getByRole('button', { name: 'Google Chrome — Default' })).toBeDefined() })
+    expect(loginSources).toHaveBeenCalledOnce()
+    fireEvent.click(mounted.view.getByRole('button', { name: 'Google Chrome — Default' }))
+    await waitFor(() => { expect(mounted.view.getByRole('status').textContent).toContain('Google Chrome — Default') })
+    expect(importLogins).toHaveBeenCalledWith('chrome:Google/Chrome:Default')
   })
 
   it('reloads the latest controlled URL instead of replaying the initial URL after remount', async () => {
