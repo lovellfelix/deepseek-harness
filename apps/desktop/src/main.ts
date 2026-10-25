@@ -58,6 +58,8 @@ import { readDesktopSettings } from './settings.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
+import { describeChromiumSources, importChromiumCookies, listChromiumProfiles } from './chromium-cookies.ts'
+import { configurePlatformWebAuthn } from './webauthn.ts'
 import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
@@ -317,6 +319,8 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 }
 
 async function main(): Promise<void> {
+  // Platform WebAuthn must be configured before any webview exists; failure keeps password-only sign-in.
+  configurePlatformWebAuthn()
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
@@ -423,7 +427,21 @@ async function main(): Promise<void> {
   const applicationUrl = `${SCHEME}://app/`
   let hostUrl: string | undefined
   let hostCookie: string | undefined
-  const browserGuests = new DesktopBrowserGuests(() => hostUrl)
+  const browserGuests = new DesktopBrowserGuests(() => hostUrl, {
+    // macOS can hold several discoverable credentials per site; let the operator pick one in a native dialog.
+    selectWebAuthnAccount: async (choice) => {
+      if (choice.accounts.length === 1) return choice.accounts[0]?.credentialId
+      const labels = choice.accounts.map((account, index) => account.displayName ?? account.name ?? `Passkey ${String(index + 1)}`)
+      const response = await ordinaryMessageBox({
+        type: 'question',
+        title: 'Sign in with a passkey',
+        message: `Choose a passkey for ${choice.relyingPartyId}.`,
+        buttons: [...labels, currentDesktopLocale().messages.cancel],
+        cancelId: labels.length,
+      })
+      return response.response < labels.length ? choice.accounts[response.response]?.credentialId : undefined
+    },
+  })
   let injections: readonly unknown[] = []
   let welcomeBackend: DesktopWelcomeBackend | undefined
   let reportedLaunch = false
@@ -740,6 +758,17 @@ async function main(): Promise<void> {
   ipcMain.handle(DESKTOP_IPC.browserRelease, (event, lease: unknown) => {
     assertProductSender(event)
     return browserGuests.release(event.sender, lease)
+  })
+  ipcMain.handle(DESKTOP_IPC.browserLoginSources, (event) => {
+    assertProductSender(event)
+    return describeChromiumSources(listChromiumProfiles())
+  })
+  ipcMain.handle(DESKTOP_IPC.browserImportLogins, async (event, sourceId: unknown) => {
+    assertProductSender(event)
+    if (typeof sourceId !== 'string') return { status: 'unavailable', reason: 'unsupported-browser' }
+    const profile = listChromiumProfiles().find(candidate => candidate.id === sourceId)
+    if (profile === undefined) return { status: 'unavailable', reason: 'unsupported-browser' }
+    return importChromiumCookies(browserGuests.loginImportTargets(event.sender), profile)
   })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*', 'wss://127.0.0.1/*'] }, (details, callback) => {

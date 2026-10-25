@@ -4,6 +4,29 @@ import { app, session, type BrowserWindow, type Session, type WebContents } from
 import type { DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 
+/** One discoverable credential offered to the operator when a WebAuthn sign-in has several. */
+export interface DesktopBrowserWebAuthnAccount {
+  readonly credentialId: string
+  readonly name?: string
+  readonly displayName?: string
+}
+
+/** Details of a WebAuthn discoverable-credential choice the shell must resolve. */
+export interface DesktopBrowserWebAuthnChoice {
+  readonly relyingPartyId: string
+  readonly accounts: readonly DesktopBrowserWebAuthnAccount[]
+}
+
+/** Shell callbacks that need the Electron main process; omitted by tests and non-Desktop carriers. */
+export interface DesktopBrowserGuestOptions {
+  /**
+   * Resolve which discovered credential answers a sign-in.
+   * @param choice - relying party and accounts to choose between.
+   * @returns the selected credential id, or `undefined` to cancel the request.
+   */
+  readonly selectWebAuthnAccount?: (choice: DesktopBrowserWebAuthnChoice) => Promise<string | undefined>
+}
+
 interface GuestLease {
   readonly owner: WebContents
   readonly partition: string
@@ -17,8 +40,14 @@ export class DesktopBrowserGuests {
   private readonly partitions = new Map<string, string>()
   private readonly leases = new Map<DesktopBrowserLeaseId, GuestLease>()
 
-  /** @param hostUrl - current authenticated DSH Host, which guests cannot request. */
-  constructor(private readonly hostUrl: () => string | undefined) {}
+  /**
+   * @param hostUrl - current authenticated DSH Host, which guests cannot request.
+   * @param options - shell callbacks for capabilities that need Electron APIs.
+   */
+  constructor(
+    private readonly hostUrl: () => string | undefined,
+    private readonly options: DesktopBrowserGuestOptions = {},
+  ) {}
 
   /**
    * Reserve one guest in a workspace's process-lifetime partition.
@@ -138,12 +167,33 @@ export class DesktopBrowserGuests {
     owner.once('destroyed', releaseAll)
   }
 
+  /**
+   * Sessions whose Browser guests receive an imported saved login state.
+   * @param owner - authenticated application window.
+   * @returns one live session per partition the window's open Browser tabs use.
+   */
+  loginImportTargets(owner: WebContents): readonly Session[] {
+    const partitions = new Set<string>()
+    for (const lease of this.leases.values()) if (lease.owner === owner) partitions.add(lease.partition)
+    return [...partitions].map(partition => session.fromPartition(partition))
+  }
+
   private configureSession(browserSession: Session): void {
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) => { callback(false) })
     browserSession.setPermissionCheckHandler(() => false)
     browserSession.setDevicePermissionHandler(() => false)
     browserSession.setDisplayMediaRequestHandler((_request, callback) => { callback({}) })
     browserSession.on('will-download', (event) => { event.preventDefault() })
+    const selectWebAuthnAccount = this.options.selectWebAuthnAccount
+    if (selectWebAuthnAccount !== undefined) {
+      browserSession.on('select-webauthn-account', (_event, details, callback) => {
+        void selectWebAuthnAccount({ relyingPartyId: details.relyingPartyId, accounts: details.accounts })
+          .then(credentialId => { callback(credentialId) }, error => {
+            console.error('desktop browser: WebAuthn account selection failed', error)
+            callback()
+          })
+      })
+    }
     browserSession.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url)
       const network = ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)

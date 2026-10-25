@@ -247,3 +247,76 @@
   flex: 0 0 auto;
   margin-right: 4px;
 }
+
+/* Saved-login importer; only present when the Desktop shell carries the bridge. */
+.loginActive {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.loginPanel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+  background: var(--dsw-alias-bg-layer-1);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l3);
+}
+
+.loginHeading {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+  font-weight: 500;
+}
+
+.loginHint {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxxs-11);
+}
+
+.loginList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loginSource,
+.loginClose {
+  box-sizing: border-box;
+  align-self: flex-start;
+  padding: 5px 9px;
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+  text-align: left;
+  cursor: pointer;
+  background: var(--dsw-alias-bg-base);
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm);
+}
+
+.loginSource:hover:not(:disabled),
+.loginClose:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.loginSource:disabled,
+.loginClose:disabled {
+  color: var(--dsw-alias-label-quaternary);
+  cursor: default;
+}
+
+.loginNotice {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxxs-11);
+}
+
+.loginActions {
+  display: flex;
+  justify-content: flex-end;
+}
